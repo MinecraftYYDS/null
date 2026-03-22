@@ -624,6 +624,67 @@ body.gravity-mode .card::after {
   width: 5px; height: 5px; border-radius: 50%;
 }
 
+.firework-shell {
+  position: fixed;
+  pointer-events: none;
+  z-index: 7778;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.firework-trail {
+  position: fixed;
+  pointer-events: none;
+  z-index: 7776;
+  width: 3px;
+  height: 10px;
+  border-radius: 999px;
+  filter: blur(.1px);
+}
+
+.firework-particle {
+  position: fixed;
+  pointer-events: none;
+  z-index: 7779;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+.firework-flash {
+  position: fixed;
+  pointer-events: none;
+  z-index: 7780;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  animation: fireFlash .26s ease-out forwards;
+}
+
+.firework-ring {
+  position: fixed;
+  pointer-events: none;
+  z-index: 7775;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,.65);
+  transform: translate(-50%, -50%);
+  animation: fireRing .72s cubic-bezier(.14,.8,.28,1) forwards;
+}
+
+@keyframes fireFlash {
+  0%   { opacity: .95; transform: translate(-50%, -50%) scale(.3); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(4.4); }
+}
+
+@keyframes fireRing {
+  0%   { opacity: .85; transform: translate(-50%, -50%) scale(.4); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(14); }
+}
+
 /* ===== PIXELATE ===== */
 body.pixelated .wrapper {
   filter: url(#pixelate);

@@ -605,7 +605,7 @@
       el.style.filter = '';
     });
 
-    $$('.firework, .collision-spark, .dust-puff').forEach(el => el.remove());
+    $$('.firework, .firework-shell, .firework-trail, .firework-particle, .firework-flash, .firework-ring, .collision-spark, .dust-puff').forEach(el => el.remove());
     gravityFxState.drag = null;
     gravityFxState.cards = [];
     gravityFxState.active = false;
@@ -640,31 +640,117 @@
   }
 
   /* ==========================================================
-     19. FIREWORKS — canvas‐free DOM sparks
+     19. FIREWORKS — cinematic launch + burst + glow rings
      ========================================================== */
   function fireworks(count = 40) {
-    for (let i = 0; i < count; i++) {
-      const el = document.createElement('div');
-      el.className = 'firework';
-      const x = rand(0, innerWidth);
-      const y = rand(0, innerHeight * 0.6);
-      const hue = rand(0, 360);
-      el.style.cssText = `
-        left:${x}px; top:${y}px;
-        background: hsl(${hue},100%,70%);
-        box-shadow: 0 0 6px hsl(${hue},100%,70%), 0 0 14px hsl(${hue},100%,55%);
-      `;
-      document.body.appendChild(el);
+    const salvos = Math.max(1, Math.round(count / 20));
+    for (let s = 0; s < salvos; s++) {
+      const delay = s * rand(120, 260);
+      setTimeout(() => {
+        const shellCount = Math.max(1, Math.round(count / salvos / 12));
+        for (let i = 0; i < shellCount; i++) {
+          const x = rand(innerWidth * 0.12, innerWidth * 0.88);
+          const targetY = rand(innerHeight * 0.18, innerHeight * 0.55);
+          const hue = rand(0, 360);
+          const power = rand(0.8, 1.35);
+          launchFireworkShell(x, targetY, hue, power);
+        }
+      }, delay);
+    }
+  }
 
-      const angle = rand(0, Math.PI * 2);
-      const dist  = rand(40, 160);
-      const dur   = rand(600, 1200);
-      el.animate([
-        { transform: 'translate(0,0) scale(1)', opacity: 1 },
-        { transform: `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist}px) scale(0)`, opacity: 0 },
-      ], { duration: dur, easing: 'cubic-bezier(.2,.8,.3,1)', fill: 'forwards' });
+  function launchFireworkShell(x, targetY, hue, power) {
+    const shell = document.createElement('div');
+    shell.className = 'firework-shell';
+    shell.style.left = `${x}px`;
+    shell.style.top = `${innerHeight + 18}px`;
+    shell.style.background = `hsl(${hue}, 100%, 72%)`;
+    shell.style.boxShadow = `0 0 10px hsl(${hue},100%,72%), 0 0 24px hsl(${hue},100%,58%)`;
+    document.body.appendChild(shell);
 
-      setTimeout(() => el.remove(), dur + 50);
+    const launchDur = rand(650, 980);
+    shell.animate([
+      { transform: 'translate3d(0,0,0) scale(1)', opacity: 0.92 },
+      { transform: `translate3d(${rand(-20, 20)}px, ${targetY - (innerHeight + 18)}px, 0) scale(0.7)`, opacity: 1 },
+    ], { duration: launchDur, easing: 'cubic-bezier(.2,.8,.28,1)', fill: 'forwards' });
+
+    const trailTick = setInterval(() => {
+      const t = document.createElement('div');
+      t.className = 'firework-trail';
+      t.style.left = `${x + rand(-6, 6)}px`;
+      t.style.top = `${rand(targetY + 24, innerHeight - 8)}px`;
+      t.style.background = `hsla(${hue}, 100%, 75%, .75)`;
+      t.style.boxShadow = `0 0 10px hsla(${hue},100%,68%,.7)`;
+      document.body.appendChild(t);
+      const dur = rand(320, 560);
+      t.animate([
+        { transform: 'translate3d(0,0,0) scale(1)', opacity: 0.9 },
+        { transform: `translate3d(${rand(-18, 18)}px, ${rand(10, 36)}px, 0) scale(0)`, opacity: 0 },
+      ], { duration: dur, easing: 'ease-out', fill: 'forwards' });
+      setTimeout(() => t.remove(), dur + 20);
+    }, 34);
+
+    setTimeout(() => {
+      clearInterval(trailTick);
+      shell.remove();
+      explodeFirework(x, targetY, hue, power);
+    }, launchDur + 20);
+  }
+
+  function explodeFirework(x, y, hue, power) {
+    const patterns = ['sphere', 'ring', 'willow'];
+    const pattern = pick(patterns);
+    const baseCount = Math.floor(rand(34, 62) * power);
+
+    const flash = document.createElement('div');
+    flash.className = 'firework-flash';
+    flash.style.left = `${x}px`;
+    flash.style.top = `${y}px`;
+    flash.style.background = `radial-gradient(circle, hsla(${hue},100%,90%,.95), hsla(${hue},100%,60%,.12) 55%, transparent 70%)`;
+    document.body.appendChild(flash);
+    setTimeout(() => flash.remove(), 260);
+
+    const ring = document.createElement('div');
+    ring.className = 'firework-ring';
+    ring.style.left = `${x}px`;
+    ring.style.top = `${y}px`;
+    ring.style.borderColor = `hsla(${hue},100%,76%,.75)`;
+    document.body.appendChild(ring);
+    setTimeout(() => ring.remove(), 720);
+
+    for (let i = 0; i < baseCount; i++) {
+      const p = document.createElement('div');
+      p.className = 'firework-particle';
+      p.style.left = `${x}px`;
+      p.style.top = `${y}px`;
+
+      const angle = pattern === 'ring'
+        ? (i / baseCount) * Math.PI * 2 + rand(-0.04, 0.04)
+        : rand(0, Math.PI * 2);
+
+      const radius = pattern === 'willow'
+        ? rand(90, 220) * power
+        : pattern === 'ring'
+          ? rand(120, 210) * power
+          : rand(70, 190) * power;
+
+      const lift = pattern === 'willow' ? rand(-30, 10) : rand(-24, 24);
+      const dx = Math.cos(angle) * radius;
+      const dy = Math.sin(angle) * radius + lift;
+      const driftY = pattern === 'willow' ? rand(45, 95) : rand(20, 60);
+
+      const sat = pattern === 'ring' ? 95 : 88;
+      const light = pattern === 'willow' ? 74 : 67;
+      p.style.background = `hsl(${hue + rand(-18, 18)}, ${sat}%, ${light}%)`;
+      p.style.boxShadow = `0 0 8px hsla(${hue},100%,70%,.85), 0 0 22px hsla(${hue},100%,58%,.6)`;
+
+      document.body.appendChild(p);
+      const dur = pattern === 'willow' ? rand(900, 1350) : rand(620, 980);
+      p.animate([
+        { transform: 'translate3d(0,0,0) scale(1)', opacity: 1 },
+        { transform: `translate3d(${dx}px, ${dy + driftY}px, 0) scale(${rand(0.25, 0.6)})`, opacity: 0 },
+      ], { duration: dur, easing: 'cubic-bezier(.18,.85,.3,1)', fill: 'forwards' });
+      setTimeout(() => p.remove(), dur + 30);
     }
   }
 
@@ -731,14 +817,14 @@
     document.addEventListener('touchstart', (e) => {
       const t = e.touches[0];
       if (!t) return;
-      for (let i = 0; i < 8; i++) {
+      for (let i = 0; i < 10; i++) {
         const el = document.createElement('div');
-        el.className = 'firework';
+        el.className = 'firework-particle';
         const hue = rand(0, 360);
         el.style.cssText = `
           left:${t.clientX}px; top:${t.clientY}px;
           background:hsl(${hue},100%,70%);
-          box-shadow:0 0 6px hsl(${hue},100%,70%);
+          box-shadow:0 0 8px hsl(${hue},100%,70%);
           width:4px; height:4px;
         `;
         document.body.appendChild(el);
