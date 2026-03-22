@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#05080f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>无意义宇宙 · 但很酷</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ===== LOADER ===== -->
+  <div id="loader">
+    <div class="loader-ring"></div>
+    <div class="loader-text">正在加载无意义模块…</div>
+    <div class="loader-bar"><span></span></div>
+  </div>
+
+  <!-- ===== SVG PIXEL FILTER ===== -->
+  <svg style="position:absolute;width:0;height:0">
+    <filter id="pixelate">
+      <feFlood x="2" y="2" height="1" width="1"/>
+      <feComposite width="7" height="7"/>
+      <feTile result="a"/>
+      <feComposite in="SourceGraphic" in2="a" operator="in"/>
+      <feMorphology operator="dilate" radius="3.5"/>
+    </filter>
+  </svg>
+
+  <!-- ===== FLASH OVERLAY ===== -->
+  <div class="flash-overlay"></div>
+
+  <!-- ===== TOAST ===== -->
+  <div class="toast-container"></div>
+
+  <!-- ===== CANVAS LAYERS ===== -->
+  <canvas id="bgCanvas"></canvas>
+  <canvas id="particleCanvas"></canvas>
+
+  <!-- ===== CURSOR ===== -->
+  <div class="cursor-ring"></div>
+  <div class="cursor-dot"></div>
+
+  <!-- ===== MAIN CONTENT ===== -->
+  <div class="wrapper">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="logo">
+        <span class="logo-dot"></span>
+        meaningless.site // v∞
+      </div>
+      <div class="topbar-right">
+        <div class="visitor-count">访客 #<span id="visitors">0</span></div>
+        <div class="clock" id="clock">--:--:--</div>
+      </div>
+    </header>
+
+    <!-- HERO -->
+    <section class="hero reveal">
+      <div class="hero-badge">✦ NO PURPOSE DETECTED</div>
+      <h1 class="hero-title">
+        <span class="glitch" data-text="这是一个无意义网站">这是一个无意义网站</span>
+      </h1>
+      <p class="hero-sub">
+        因为我还不知道网站该写什么，所以我决定把「没有意义」本身做成意义——<br>
+        发光、故障风、矩阵雨、粒子海、假装很厉害的进度条，以及一本正经地胡说八道。<br>
+        <strong>按 F 放烟花 · 按 C 制造混沌 · 手机下拉刷新</strong>
+      </p>
+      <div class="btn-row">
+        <button class="btn btn-glow" id="boostBtn">
+          <span class="btn-icon">⚡</span> 开启量子炫酷模式
+        </button>
+        <button class="btn" id="ideaBtn">
+          <span class="btn-icon">🎲</span> 随机生成离谱创意
+        </button>
+        <button class="btn" id="chaosBtn">
+          <span class="btn-icon">🌀</span> 制造一点混沌
+        </button>
+      </div>
+    </section>
+
+    <!-- STAT ROW -->
+    <section class="reveal">
+      <div class="section-label">无意义数据中心</div>
+      <div class="stat-grid">
+        <div class="stat-card reveal">
+          <div class="stat-number" data-to="9527">0</div>
+          <div class="stat-label">已浪费的像素</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-number" data-to="404">0</div>
+          <div class="stat-label">找不到的意义</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-number" data-to="1024">0</div>
+          <div class="stat-label">无效代码行数</div>
+        </div>
+        <div class="stat-card reveal">
+          <div class="stat-number" data-to="88">0</div>
+          <div class="stat-label">炫酷密度 %</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAIN GRID -->
+    <section>
+      <div class="section-label">核心模块</div>
+      <div class="grid">
+
+        <!-- 无意义宣言 -->
+        <article class="card s8 reveal">
+          <div class="card-title"><span class="dot"></span>无意义宣言</div>
+          <p class="nonsense-text" id="nonsenseText">正在酝酿一句毫无必要但很有气势的话……</p>
+          <div class="taglist" id="tags"></div>
+        </article>
+
+        <!-- 炫酷值监控 -->
+        <article class="card s4 reveal">
+          <div class="card-title"><span class="dot"></span>炫酷值监控</div>
+          <p>实时检测页面的「酷度密度」：</p>
+          <div class="meter-wrap" style="margin-top:14px;">
+            <label><span>coolness</span><span id="coolLabel">普通帅</span></label>
+            <div class="meter">
+              <div class="meter-glow"></div>
+              <div class="meter-fill" id="coolFill"></div>
+            </div>
+          </div>
+          <div style="margin-top:16px;">
+            <div class="card-title" style="font-size:11px;margin-bottom:8px;"><span class="dot" style="background:var(--neon2);box-shadow:0 0 8px var(--neon2)"></span>环境音频</div>
+            <div class="audio-bars">
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+              <div class="audio-bar"></div><div class="audio-bar"></div><div class="audio-bar"></div>
+            </div>
+          </div>
+        </article>
+
+        <!-- 伪终端 -->
+        <article class="card s6 reveal">
+          <div class="card-title"><span class="dot"></span>系统终端</div>
+          <div class="terminal" id="terminal"></div>
+        </article>
+
+        <!-- 意义生成器 -->
+        <article class="card s6 reveal">
+          <div class="card-title"><span class="dot" style="background:var(--neon4);box-shadow:0 0 8px var(--neon4)"></span><span class="rainbow">意义生成器</span></div>
+          <p class="idea-output" id="ideaOutput">点击「随机生成离谱创意」，让宇宙替你决定方向。</p>
+          <div class="taglist" style="margin-top:16px;">
+            <span class="tag">#纯前端</span>
+            <span class="tag">#创意过载</span>
+            <span class="tag">#无意义美学</span>
+            <span class="tag">#零生产力</span>
+          </div>
+        </article>
+
+        <!-- 奇怪功能面板 -->
+        <article class="card s12 reveal">
+          <div class="card-title"><span class="dot" style="background:var(--neon2);box-shadow:0 0 8px var(--neon2)"></span>奇怪功能面板</div>
+          <p>下面这些按钮没有任何生产力价值，但会让你心情变好：</p>
+          <div class="fun-btn-grid">
+            <button class="btn" data-mode="invert"><span class="btn-icon">🔄</span> 反转宇宙颜色</button>
+            <button class="btn" data-mode="disco"><span class="btn-icon">🪩</span> 迪斯科模式</button>
+            <button class="btn" data-mode="gravity"><span class="btn-icon">🪐</span> 重力失效</button>
+            <button class="btn" data-mode="firework"><span class="btn-icon">🎆</span> 发射烟花</button>
+            <button class="btn" data-mode="pixel"><span class="btn-icon">👾</span> 像素化</button>
+            <button class="btn" data-mode="reset"><span class="btn-icon">🔧</span> 恢复现实</button>
+          </div>
+        </article>
+
+      </div>
+    </section>
+
+    <!-- MARQUEE -->
+    <div class="marquee-wrap reveal">
+      <div class="marquee">
+        <span>✦</span> NO PURPOSE DETECTED
+        <span>✦</span> VIBE MODE ON
+        <span>✦</span> 404: MEANING NOT FOUND
+        <span>✦</span> AESTHETIC OVERLOAD
+        <span>✦</span> RUNNING ON PURE CSS ENERGY
+        <span>✦</span> 炫酷就是正义
+        <span>✦</span> 代码已运行 灵魂已放飞
+        <span>✦</span> NO PURPOSE DETECTED
+        <span>✦</span> VIBE MODE ON
+        <span>✦</span> 404: MEANING NOT FOUND
+        <span>✦</span> AESTHETIC OVERLOAD
+        <span>✦</span> RUNNING ON PURE CSS ENERGY
+        <span>✦</span> 炫酷就是正义
+        <span>✦</span> 代码已运行 灵魂已放飞
+      </div>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="footer reveal">
+      © 2026 无意义研究中心 · 如果看不懂，说明它成功了。<br>
+      Built with <span style="color:var(--neon2)">♥</span> and absolutely zero purpose.
+    </footer>
+
+  </div>
+
+  <!-- ===== MOBILE SWIPE HINT ===== -->
+  <div class="swipe-hint">↓ 下拉刷新 · 触摸屏幕放粒子 ↓</div>
+
+  <!-- ===== MOBILE FLOATING ACTION BAR ===== -->
+  <div class="mobile-fab">
+    <button class="fab-btn" id="fab-boost" title="量子模式">⚡</button>
+    <button class="fab-btn" id="fab-chaos" title="混沌">🌀</button>
+    <button class="fab-btn" id="fab-firework" title="烟花">🎆</button>
+    <button class="fab-btn" id="fab-idea" title="创意">🎲</button>
+    <button class="fab-btn" id="fab-disco" title="迪斯科">🪩</button>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
