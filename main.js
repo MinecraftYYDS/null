@@ -12,6 +12,34 @@
   const pick = arr => arr[Math.floor(Math.random() * arr.length)];
   const isMobile = () => innerWidth <= 680 || ('ontouchstart' in window);
 
+  const gravityFxState = {
+    active: false,
+    ready: false,
+    cards: [],
+    rafId: 0,
+    drag: null,
+    lastTs: 0,
+    gravity: { x: 0, y: 1800 },
+    gyroTilt: { x: 0, y: 0 },
+    /* physics tuning */
+    SUBSTEPS: 6,
+    COLLISION_ITERS: 4,
+    RESTITUTION: 0.45,
+    FRICTION_DYNAMIC: 0.35,
+    FRICTION_STATIC: 0.55,
+    AIR_DRAG: 0.9985,
+    ANGULAR_DAMPING: 0.9,
+    MAX_ANGULAR_SPEED: 3.6,
+    ANGULAR_IMPULSE_SCALE: 0.12,
+    SLEEP_VEL: 4,
+    SLEEP_ANG: 0.08,
+    SLEEP_FRAMES: 40,
+  };
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
   /* ==========================================================
      1. LOADING SCREEN
      ========================================================== */
@@ -329,12 +357,14 @@
     if (isMobile()) return; // gyro handles mobile
     $$('.card').forEach(card => {
       card.addEventListener('mousemove', e => {
+        if (gravityFxState.active) return;
         const rect = card.getBoundingClientRect();
         const x = (e.clientX - rect.left) / rect.width  - 0.5;
         const y = (e.clientY - rect.top)  / rect.height - 0.5;
         card.style.transform = `perspective(700px) rotateY(${x * 8}deg) rotateX(${-y * 8}deg) scale(1.02)`;
       });
       card.addEventListener('mouseleave', () => {
+        if (gravityFxState.active) return;
         card.style.transform = 'perspective(700px) rotateY(0) rotateX(0) scale(1)';
       });
     });
@@ -523,15 +553,7 @@
           window._termLog?.('disco_mode: cycling curated palettes', 'ok');
         }
         if (mode === 'gravity') {
-          $$('.card').forEach((c, i) => {
-            c.animate([
-              { transform: 'translateY(0)' },
-              { transform: `translateY(${i % 2 ? -20 : 20}px) rotate(${i % 2 ? 1 : -1}deg)` },
-              { transform: 'translateY(0)' },
-            ], { duration: 2400, iterations: 2, easing: 'ease-in-out' });
-          });
-          toast('重力场临时关闭');
-          window._termLog?.('gravity: disabled for 5s', 'warn');
+          toggleGravityPhysics();
         }
         if (mode === 'firework') {
           fireworks(80);
@@ -545,14 +567,53 @@
           window._termLog?.(on ? 'render: pixelated ON' : 'render: pixelated OFF', 'cmd');
         }
         if (mode === 'reset') {
-          document.body.style.filter = 'none';
-          document.body.classList.remove('pixelated');
-          resetPalette();
+          forceResetReality();
           toast('现实参数已恢复');
           window._termLog?.('system.reset() — normality restored', 'ok');
         }
       });
     });
+  }
+
+  function forceResetReality() {
+    document.body.style.filter = 'none';
+    document.body.classList.remove('pixelated', 'gravity-mode');
+
+    if (gravityFxState.active) {
+      stopGravityPhysics();
+    }
+
+    // If physics state got out of sync, force clear all possible residues.
+    const resetTargets = $$([
+      '.topbar',
+      '.hero',
+      '.stat-card',
+      '.card',
+      '.marquee-wrap',
+      '.footer',
+      '.swipe-hint',
+      '.mobile-fab',
+      '.physics-item',
+      '.physics-card'
+    ].join(','));
+
+    resetTargets.forEach(el => {
+      el.classList.remove('physics-item', 'physics-card', 'dragging', 'shake');
+      el.style.transform = '';
+      el.style.transition = '';
+      el.style.zIndex = '';
+      el.style.filter = '';
+    });
+
+    $$('.firework, .collision-spark, .dust-puff').forEach(el => el.remove());
+    gravityFxState.drag = null;
+    gravityFxState.cards = [];
+    gravityFxState.active = false;
+    gravityFxState.lastTs = 0;
+    gravityFxState.gyroTilt.x = 0;
+    gravityFxState.gyroTilt.y = 0;
+
+    resetPalette();
   }
 
   /* ==========================================================
@@ -703,8 +764,11 @@
     function handleOrientation(e) {
       const gamma = Math.max(-15, Math.min(15, e.gamma || 0)); // left-right
       const beta  = Math.max(-15, Math.min(15, (e.beta || 0) - 40)); // front-back (offset for hand hold)
-      const rx = (gamma / 15) * 4; // degrees
+      const rx = (gamma / 15) * 4;
       const ry = (beta  / 15) * 4;
+      gravityFxState.gyroTilt.x = gamma / 15;
+      gravityFxState.gyroTilt.y = beta / 15;
+      if (gravityFxState.active) return;
       cards.forEach(card => {
         card.style.transform = `perspective(700px) rotateY(${rx}deg) rotateX(${-ry}deg)`;
       });
@@ -777,6 +841,563 @@
     }, { passive: true });
 
     document.addEventListener('touchend', () => { pulling = false; });
+  }
+
+  /* ==========================================================
+     27. PHYSICS GRAVITY MODE — FULL ENGINE REWRITE
+         Features: sub-stepping, rotation, friction, bouncing,
+         stacking, collision sparks, drag-push, throw velocity,
+         sleep system, angular impulse, surface contact
+     ========================================================== */
+  function toggleGravityPhysics() {
+    if (gravityFxState.active) { stopGravityPhysics(); return; }
+    startGravityPhysics();
+  }
+
+  /* ---- Collision spark effect ---- */
+  function spawnCollisionSparks(x, y, intensity) {
+    const count = Math.min(12, Math.max(3, Math.floor(intensity / 60)));
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement('div');
+      el.className = 'collision-spark';
+      const hue = rand(20, 55);
+      const size = rand(2, 5);
+      el.style.cssText = `left:${x}px;top:${y}px;width:${size}px;height:${size}px;background:hsl(${hue},100%,70%);box-shadow:0 0 ${size*2}px hsl(${hue},100%,60%);`;
+      document.body.appendChild(el);
+      const angle = rand(0, Math.PI * 2);
+      const dist = rand(15, 50 + intensity * 0.15);
+      const dur = rand(250, 500);
+      el.animate([
+        { transform: 'translate(0,0) scale(1)', opacity: 1 },
+        { transform: `translate(${Math.cos(angle)*dist}px, ${Math.sin(angle)*dist - 20}px) scale(0)`, opacity: 0 },
+      ], { duration: dur, easing: 'cubic-bezier(.15,.8,.3,1)', fill: 'forwards' });
+      setTimeout(() => el.remove(), dur + 30);
+    }
+  }
+
+  /* ---- Dust puff when landing hard ---- */
+  function spawnDustPuff(x, y, w) {
+    const count = Math.min(8, Math.max(3, Math.floor(w / 80)));
+    for (let i = 0; i < count; i++) {
+      const el = document.createElement('div');
+      el.className = 'dust-puff';
+      const spread = rand(-w * 0.3, w * 0.3);
+      el.style.cssText = `left:${x + spread}px;top:${y}px;`;
+      document.body.appendChild(el);
+      const dx = rand(-30, 30);
+      const dur = rand(400, 700);
+      el.animate([
+        { transform: 'translate(0,0) scale(0.3)', opacity: 0.6 },
+        { transform: `translate(${dx}px, ${rand(-25, -50)}px) scale(1.5)`, opacity: 0 },
+      ], { duration: dur, easing: 'ease-out', fill: 'forwards' });
+      setTimeout(() => el.remove(), dur + 30);
+    }
+  }
+
+  /* ---- Impact flash on card ---- */
+  function flashImpact(el, intensity) {
+    if (intensity < 200) return;
+    const brightness = Math.min(1.4, 1 + intensity / 3000);
+    el.style.filter = `brightness(${brightness})`;
+    setTimeout(() => { el.style.filter = ''; }, 100);
+  }
+
+  function startGravityPhysics() {
+    const bodies = collectPhysicsBodies();
+    if (!bodies.length) return;
+
+    if (!gravityFxState.ready) {
+      initGravityDragHandlers(bodies);
+      gravityFxState.ready = true;
+    }
+
+    gravityFxState.cards = bodies.map((el, idx) => {
+      const rect = el.getBoundingClientRect();
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const w = Math.max(20, rect.width);
+      const h = Math.max(20, rect.height);
+      el.classList.add('physics-item');
+      if (el.classList.contains('card')) el.classList.add('physics-card');
+      el.style.transition = 'none';
+      /* moment of inertia for a rectangle: (1/12) * m * (w^2 + h^2) */
+      const mass = Math.max(0.5, (w * h) / 25000);
+      const inertia = (1.0 / 12.0) * mass * (w * w + h * h);
+      return {
+        el,
+        x: cx, y: cy,
+        ox: cx, oy: cy,
+        vx: rand(-60, 60),
+        vy: rand(-120, 0),
+        w, h,
+        mass,
+        inertia: Math.max(1000, inertia),
+        angle: 0,
+        angularVel: rand(-0.25, 0.25),
+        pointerId: null,
+        z: idx + 10,
+        sleeping: false,
+        sleepCounter: 0,
+        lastImpactTime: 0,
+        onGround: false,
+        contactNormal: { x: 0, y: 0 },
+      };
+    });
+
+    gravityFxState.active = true;
+    gravityFxState.lastTs = 0;
+    document.body.classList.add('gravity-mode');
+    toast('⚡ 重力失效：真实物理引擎已上线');
+    window._termLog?.('gravity.fx: physics engine v2 — substep=' + gravityFxState.SUBSTEPS, 'warn');
+    gravityFxState.rafId = requestAnimationFrame(stepGravityPhysics);
+  }
+
+  function stopGravityPhysics() {
+    cancelAnimationFrame(gravityFxState.rafId);
+    gravityFxState.rafId = 0;
+    gravityFxState.active = false;
+    gravityFxState.drag = null;
+    document.body.classList.remove('gravity-mode');
+
+    gravityFxState.cards.forEach(({ el }) => {
+      el.classList.remove('physics-item', 'physics-card', 'dragging');
+      el.style.transition = '';
+      el.style.transform = '';
+      el.style.zIndex = '';
+      el.style.filter = '';
+    });
+    gravityFxState.cards = [];
+
+    toast('重力场恢复稳定');
+    window._termLog?.('gravity.fx: physics loop stopped', 'ok');
+  }
+
+  /* ---- Drag handlers with throw velocity tracking ---- */
+  function initGravityDragHandlers(items) {
+    items.forEach(itemEl => {
+      itemEl.addEventListener('pointerdown', e => {
+        if (!gravityFxState.active) return;
+
+        const interactiveTarget = e.target instanceof Element
+          ? e.target.closest('button, .btn, .fab-btn, a, input, select, textarea, [data-mode]')
+          : null;
+        if (interactiveTarget) return;
+
+        const item = gravityFxState.cards.find(c => c.el === itemEl);
+        if (!item) return;
+
+        /* wake up the dragged item and nearby items */
+        item.sleeping = false;
+        item.sleepCounter = 0;
+
+        item.pointerId = e.pointerId;
+        const rect = itemEl.getBoundingClientRect();
+        const grabX = e.clientX - (rect.left + rect.width / 2);
+        const grabY = e.clientY - (rect.top + rect.height / 2);
+
+        gravityFxState.drag = {
+          item,
+          lastX: e.clientX,
+          lastY: e.clientY,
+          grabX, grabY,
+          velHistory: [],     /* track 6 frames of velocity for throw */
+        };
+        itemEl.classList.add('dragging');
+        itemEl.style.zIndex = '9999';
+        try { itemEl.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+      });
+
+      itemEl.addEventListener('pointermove', e => {
+        const drag = gravityFxState.drag;
+        if (!gravityFxState.active || !drag || drag.item.el !== itemEl || drag.item.pointerId !== e.pointerId) return;
+
+        const now = performance.now();
+        const nextX = e.clientX - drag.grabX;
+        const nextY = e.clientY - drag.grabY;
+
+        /* compute instantaneous velocity */
+        const dvx = nextX - drag.item.x;
+        const dvy = nextY - drag.item.y;
+
+        drag.velHistory.push({ vx: dvx * 60, vy: dvy * 60, t: now });
+        if (drag.velHistory.length > 6) drag.velHistory.shift();
+
+        drag.item.x = nextX;
+        drag.item.y = nextY;
+        drag.item.vx = dvx * 60;
+        drag.item.vy = dvy * 60;
+
+        /* compute angular velocity from lateral movement */
+        drag.item.angularVel = clamp(dvx * 0.006, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+
+        drag.lastX = e.clientX;
+        drag.lastY = e.clientY;
+
+        /* wake all items — dragged body may push them */
+        gravityFxState.cards.forEach(c => { c.sleeping = false; c.sleepCounter = 0; });
+      });
+
+      const release = e => {
+        const drag = gravityFxState.drag;
+        if (!drag || drag.item.el !== itemEl) return;
+        if (drag.item.pointerId !== null && e.pointerId !== undefined && drag.item.pointerId !== e.pointerId) return;
+
+        /* compute throw velocity from history */
+        if (drag.velHistory.length >= 2) {
+          const recent = drag.velHistory.slice(-3);
+          let tvx = 0, tvy = 0;
+          for (const v of recent) { tvx += v.vx; tvy += v.vy; }
+          tvx /= recent.length;
+          tvy /= recent.length;
+          /* clamp throw velocity */
+          const maxThrow = 3000;
+          const throwMag = Math.sqrt(tvx * tvx + tvy * tvy);
+          if (throwMag > maxThrow) {
+            const s = maxThrow / throwMag;
+            tvx *= s; tvy *= s;
+          }
+          drag.item.vx = tvx;
+          drag.item.vy = tvy;
+          drag.item.angularVel = clamp(tvx * 0.0012, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+        }
+
+        drag.item.pointerId = null;
+        drag.item.sleeping = false;
+        drag.item.sleepCounter = 0;
+        drag.item.el.classList.remove('dragging');
+        drag.item.el.style.zIndex = String(drag.item.z);
+        gravityFxState.drag = null;
+      };
+
+      itemEl.addEventListener('pointerup', release);
+      itemEl.addEventListener('pointercancel', release);
+      itemEl.addEventListener('lostpointercapture', release);
+    });
+  }
+
+  function collectPhysicsBodies() {
+    const selector = [
+      '.topbar',
+      '.hero',
+      '.stat-card',
+      '.card',
+      '.marquee-wrap',
+      '.footer',
+      '.swipe-hint',
+      '.mobile-fab'
+    ].join(',');
+
+    return $$(selector).filter(el => {
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      const rect = el.getBoundingClientRect();
+      return rect.width > 24 && rect.height > 24;
+    });
+  }
+
+  /* ---- Main physics loop with sub-stepping ---- */
+  function stepGravityPhysics(ts) {
+    if (!gravityFxState.active) return;
+    if (!gravityFxState.lastTs) gravityFxState.lastTs = ts;
+    const rawDt = Math.min(0.05, (ts - gravityFxState.lastTs) / 1000);
+    gravityFxState.lastTs = ts;
+
+    const gy = gravityFxState.gyroTilt;
+    gravityFxState.gravity.x = gy.x * 1400;
+    gravityFxState.gravity.y = 1800 + gy.y * 900;
+
+    const W = innerWidth;
+    const H = innerHeight;
+    const subDt = rawDt / gravityFxState.SUBSTEPS;
+
+    for (let step = 0; step < gravityFxState.SUBSTEPS; step++) {
+      /* Apply forces */
+      for (const c of gravityFxState.cards) {
+        if (c.sleeping) continue;
+        if (gravityFxState.drag?.item === c) continue;
+
+        /* gravity */
+        c.vx += gravityFxState.gravity.x * subDt;
+        c.vy += gravityFxState.gravity.y * subDt;
+
+        /* air drag */
+        c.vx *= gravityFxState.AIR_DRAG;
+        c.vy *= gravityFxState.AIR_DRAG;
+
+        /* angular damping */
+        c.angularVel *= gravityFxState.ANGULAR_DAMPING;
+        c.angularVel = clamp(c.angularVel, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+
+        /* integrate position */
+        c.x += c.vx * subDt;
+        c.y += c.vy * subDt;
+
+        /* integrate rotation */
+        c.angle += c.angularVel * subDt;
+        if (c.angle > Math.PI || c.angle < -Math.PI) {
+          c.angle = ((c.angle + Math.PI) % (Math.PI * 2)) - Math.PI;
+        }
+      }
+
+      /* Wall collisions with bounce + friction + rotation */
+      for (const c of gravityFxState.cards) {
+        if (c.sleeping) continue;
+        if (gravityFxState.drag?.item === c) continue;
+
+        const halfW = c.w / 2;
+        const halfH = c.h / 2;
+        const rest = gravityFxState.RESTITUTION;
+        const friction = gravityFxState.FRICTION_DYNAMIC;
+        const now = ts;
+
+        c.onGround = false;
+        c.contactNormal = { x: 0, y: 0 };
+
+        /* Floor */
+        if (c.y + halfH > H) {
+          const penetration = c.y + halfH - H;
+          c.y = H - halfH;
+          const impactV = Math.abs(c.vy);
+
+          if (impactV > 30 && now - c.lastImpactTime > 100) {
+            c.lastImpactTime = now;
+            spawnCollisionSparks(c.x, H, impactV);
+            if (impactV > 200) spawnDustPuff(c.x, H - 3, c.w);
+            flashImpact(c.el, impactV);
+          }
+
+          c.vy = -Math.abs(c.vy) * rest;
+          /* stop micro-bouncing */
+          if (Math.abs(c.vy) < 25) { c.vy = 0; c.onGround = true; }
+
+          /* ground friction */
+          c.vx *= (1 - friction);
+          /* rolling friction -> angular velocity from ground contact */
+          c.angularVel += (c.vx / c.w) * friction * 0.18;
+          c.angularVel *= 0.92;
+
+          c.contactNormal = { x: 0, y: -1 };
+        }
+
+        /* Ceiling */
+        if (c.y - halfH < 0) {
+          c.y = halfH;
+          const impactV = Math.abs(c.vy);
+          if (impactV > 60 && now - c.lastImpactTime > 100) {
+            c.lastImpactTime = now;
+            spawnCollisionSparks(c.x, 0, impactV);
+          }
+          c.vy = Math.abs(c.vy) * rest;
+          c.vx *= (1 - friction * 0.5);
+          c.contactNormal = { x: 0, y: 1 };
+        }
+
+        /* Left wall */
+        if (c.x - halfW < 0) {
+          c.x = halfW;
+          const impactV = Math.abs(c.vx);
+          if (impactV > 60 && now - c.lastImpactTime > 100) {
+            c.lastImpactTime = now;
+            spawnCollisionSparks(0, c.y, impactV);
+          }
+          c.vx = Math.abs(c.vx) * rest;
+          c.vy *= (1 - friction * 0.5);
+          c.angularVel -= (c.vy / c.h) * friction * 0.12;
+          c.contactNormal = { x: 1, y: 0 };
+        }
+
+        /* Right wall */
+        if (c.x + halfW > W) {
+          c.x = W - halfW;
+          const impactV = Math.abs(c.vx);
+          if (impactV > 60 && now - c.lastImpactTime > 100) {
+            c.lastImpactTime = now;
+            spawnCollisionSparks(W, c.y, impactV);
+          }
+          c.vx = -Math.abs(c.vx) * rest;
+          c.vy *= (1 - friction * 0.5);
+          c.angularVel += (c.vy / c.h) * friction * 0.12;
+          c.contactNormal = { x: -1, y: 0 };
+        }
+      }
+
+      /* Resolve inter-body collisions (multiple iterations) */
+      for (let iter = 0; iter < gravityFxState.COLLISION_ITERS; iter++) {
+        resolvePhysicsCollisions(ts, subDt);
+      }
+    }
+
+    /* Sleep detection */
+    for (const c of gravityFxState.cards) {
+      if (gravityFxState.drag?.item === c) { c.sleeping = false; c.sleepCounter = 0; continue; }
+      const speed = Math.sqrt(c.vx * c.vx + c.vy * c.vy);
+      const angSpeed = Math.abs(c.angularVel);
+      if (speed < gravityFxState.SLEEP_VEL && angSpeed < gravityFxState.SLEEP_ANG) {
+        c.sleepCounter++;
+        if (c.sleepCounter > gravityFxState.SLEEP_FRAMES) {
+          c.sleeping = true;
+          c.vx = 0; c.vy = 0; c.angularVel = 0;
+        }
+      } else {
+        c.sleepCounter = 0;
+        c.sleeping = false;
+      }
+    }
+
+    /* Render with rotation */
+    for (const c of gravityFxState.cards) {
+      const tx = (c.x - c.ox).toFixed(2);
+      const ty = (c.y - c.oy).toFixed(2);
+      const rot = (c.angle * (180 / Math.PI)).toFixed(2);
+      c.el.style.transform = `translate3d(${tx}px, ${ty}px, 0) rotate(${rot}deg)`;
+      c.el.style.zIndex = String(c.z);
+    }
+
+    gravityFxState.rafId = requestAnimationFrame(stepGravityPhysics);
+  }
+
+  /* ---- Advanced collision resolution with friction & angular impulse ---- */
+  function resolvePhysicsCollisions(ts, subDt) {
+    const arr = gravityFxState.cards;
+    const bounce = gravityFxState.RESTITUTION;
+    const friction = gravityFxState.FRICTION_DYNAMIC;
+
+    for (let i = 0; i < arr.length; i++) {
+      for (let j = i + 1; j < arr.length; j++) {
+        const a = arr[i];
+        const b = arr[j];
+
+        /* skip if both sleeping */
+        if (a.sleeping && b.sleeping) continue;
+
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const overlapX = (a.w + b.w) * 0.5 - Math.abs(dx);
+        const overlapY = (a.h + b.h) * 0.5 - Math.abs(dy);
+        if (overlapX <= 0 || overlapY <= 0) continue;
+
+        /* wake both on collision */
+        a.sleeping = false; a.sleepCounter = 0;
+        b.sleeping = false; b.sleepCounter = 0;
+
+        /* collision normal — minimum separating axis */
+        let nx = 0, ny = 0, overlap = 0;
+        if (overlapX < overlapY) {
+          nx = dx >= 0 ? 1 : -1;
+          overlap = overlapX;
+        } else {
+          ny = dy >= 0 ? 1 : -1;
+          overlap = overlapY;
+        }
+
+        /* contact point (approximate — midpoint of overlap) */
+        const cpx = (a.x + b.x) * 0.5;
+        const cpy = (a.y + b.y) * 0.5;
+
+        const aStatic = gravityFxState.drag?.item === a;
+        const bStatic = gravityFxState.drag?.item === b;
+        const invMassA = aStatic ? 0 : 1 / a.mass;
+        const invMassB = bStatic ? 0 : 1 / b.mass;
+        const invInertiaA = aStatic ? 0 : 1 / a.inertia;
+        const invInertiaB = bStatic ? 0 : 1 / b.inertia;
+        const totalInvMass = invMassA + invMassB;
+        if (totalInvMass <= 0) continue;
+
+        /* positional correction (Baumgarte stabilization) */
+        const correctionPercent = 0.6;
+        const slop = 0.5;
+        const correctionMag = Math.max(overlap - slop, 0) / totalInvMass * correctionPercent;
+        if (!aStatic) {
+          a.x -= nx * correctionMag * invMassA;
+          a.y -= ny * correctionMag * invMassA;
+        }
+        if (!bStatic) {
+          b.x += nx * correctionMag * invMassB;
+          b.y += ny * correctionMag * invMassB;
+        }
+
+        /* contact-point-relative velocity */
+        const rax = cpx - a.x, ray = cpy - a.y;
+        const rbx = cpx - b.x, rby = cpy - b.y;
+
+        const vaX = a.vx + (-a.angularVel * ray);
+        const vaY = a.vy + (a.angularVel * rax);
+        const vbX = b.vx + (-b.angularVel * rby);
+        const vbY = b.vy + (b.angularVel * rbx);
+
+        const rvx = vbX - vaX;
+        const rvy = vbY - vaY;
+        const velAlongNormal = rvx * nx + rvy * ny;
+
+        /* separating → skip */
+        if (velAlongNormal > 0) continue;
+
+        /* normal impulse */
+        const raCrossN = rax * ny - ray * nx;
+        const rbCrossN = rbx * ny - rby * nx;
+        const denom = totalInvMass + raCrossN * raCrossN * invInertiaA + rbCrossN * rbCrossN * invInertiaB;
+        if (denom <= 0) continue;
+
+        const jn = (-(1 + bounce) * velAlongNormal) / denom;
+
+        if (!aStatic) {
+          a.vx -= jn * nx * invMassA;
+          a.vy -= jn * ny * invMassA;
+          a.angularVel -= raCrossN * jn * invInertiaA * gravityFxState.ANGULAR_IMPULSE_SCALE;
+          a.angularVel = clamp(a.angularVel, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+        }
+        if (!bStatic) {
+          b.vx += jn * nx * invMassB;
+          b.vy += jn * ny * invMassB;
+          b.angularVel += rbCrossN * jn * invInertiaB * gravityFxState.ANGULAR_IMPULSE_SCALE;
+          b.angularVel = clamp(b.angularVel, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+        }
+
+        /* tangent (friction) impulse */
+        const tx = rvx - velAlongNormal * nx;
+        const ty = rvy - velAlongNormal * ny;
+        const tLen = Math.sqrt(tx * tx + ty * ty);
+        if (tLen > 0.001) {
+          const tnx = tx / tLen;
+          const tny = ty / tLen;
+          const velAlongTangent = rvx * tnx + rvy * tny;
+
+          const raCrossT = rax * tny - ray * tnx;
+          const rbCrossT = rbx * tny - rby * tnx;
+          const denomT = totalInvMass + raCrossT * raCrossT * invInertiaA + rbCrossT * rbCrossT * invInertiaB;
+          if (denomT > 0) {
+            let jt = -velAlongTangent / denomT;
+            /* Coulomb's law clamp */
+            const maxFriction = Math.abs(jn) * friction;
+            jt = Math.max(-maxFriction, Math.min(maxFriction, jt));
+
+            if (!aStatic) {
+              a.vx -= jt * tnx * invMassA;
+              a.vy -= jt * tny * invMassA;
+              a.angularVel -= raCrossT * jt * invInertiaA * gravityFxState.ANGULAR_IMPULSE_SCALE;
+              a.angularVel = clamp(a.angularVel, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+            }
+            if (!bStatic) {
+              b.vx += jt * tnx * invMassB;
+              b.vy += jt * tny * invMassB;
+              b.angularVel += rbCrossT * jt * invInertiaB * gravityFxState.ANGULAR_IMPULSE_SCALE;
+              b.angularVel = clamp(b.angularVel, -gravityFxState.MAX_ANGULAR_SPEED, gravityFxState.MAX_ANGULAR_SPEED);
+            }
+          }
+        }
+
+        /* visual: collision sparks */
+        const impactSpeed = Math.abs(velAlongNormal);
+        if (impactSpeed > 120 && ts - a.lastImpactTime > 80 && ts - b.lastImpactTime > 80) {
+          spawnCollisionSparks(cpx, cpy, impactSpeed);
+          flashImpact(a.el, impactSpeed);
+          flashImpact(b.el, impactSpeed);
+          a.lastImpactTime = ts;
+          b.lastImpactTime = ts;
+        }
+      }
+    }
   }
 
 })();

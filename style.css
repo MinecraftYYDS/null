@@ -303,6 +303,53 @@ section { margin-top: 28px; }
   box-shadow: 0 30px 80px rgba(0,0,0,.5), 0 0 20px rgba(0,229,255,.08);
 }
 
+/* ===== GRAVITY PHYSICS MODE ===== */
+body.gravity-mode .card {
+  transition: none !important;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+body.gravity-mode .physics-item {
+  transition: none !important;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  will-change: transform;
+}
+body.gravity-mode .card:hover {
+  box-shadow: 0 34px 90px rgba(0,0,0,.55), 0 0 24px rgba(0,229,255,.14);
+}
+body.gravity-mode .physics-item.dragging {
+  cursor: grabbing;
+  filter: saturate(1.2) brightness(1.08);
+  box-shadow: 0 40px 100px rgba(0,0,0,.6), 0 0 30px rgba(0,229,255,.2);
+  z-index: 9999 !important;
+}
+body.gravity-mode .card::before,
+body.gravity-mode .card::after {
+  opacity: 0 !important;
+}
+
+/* Collision sparks */
+.collision-spark {
+  position: fixed;
+  pointer-events: none;
+  z-index: 8888;
+  border-radius: 50%;
+}
+
+/* Dust puff on ground impact */
+.dust-puff {
+  position: fixed;
+  pointer-events: none;
+  z-index: 8887;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.15), transparent 70%);
+}
+
 /* Shimmer on hover */
 .card::before {
   content: ''; position: absolute;
